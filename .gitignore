@@ -1,0 +1,58 @@
+# ============================================
+# BACKEND (hoaks-BE)
+# ============================================
+
+# Virtual environment
+hoaks-BE/venv/
+
+# Environment variables (RAHASIA! jangan sampai ke-push)
+hoaks-BE/.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Model artifacts (file besar, tidak perlu di Git)
+hoaks-BE/artifacts/gat_model.pt
+hoaks-BE/artifacts/scaler.pkl
+hoaks-BE/artifacts/train_embeddings.npy
+hoaks-BE/artifacts/train_labels.npy
+hoaks-BE/artifacts/train_texts.csv
+
+# Uploaded files dari admin
+hoaks-BE/uploads/
+
+# ============================================
+# FRONTEND (hoaks-FE)
+# ============================================
+
+# Dependencies
+hoaks-FE/node_modules/
+
+# Build output
+hoaks-FE/dist/
+hoaks-FE/dist-ssr/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Local env
+*.local
+
+# ============================================
+# EDITOR & OS
+# ============================================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
