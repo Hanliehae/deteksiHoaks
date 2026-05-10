@@ -21,6 +21,9 @@ hoaks-BE/artifacts/train_embeddings.npy
 hoaks-BE/artifacts/train_labels.npy
 hoaks-BE/artifacts/train_texts.csv
 
+# Trained models output (file besar, hasil training dari UI admin)
+hoaks-BE/trained_models/
+
 # Uploaded files dari admin
 hoaks-BE/uploads/
 
