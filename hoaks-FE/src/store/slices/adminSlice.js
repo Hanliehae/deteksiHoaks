@@ -74,7 +74,7 @@ export const fetchMetrics = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const res = await api.get('/evaluation/metrics');
-      return res.data.metrics;
+      return res.data;  // {metrics, comparison, is_overfit}
     } catch (err) {
       return rejectWithValue(err.response?.data?.error || 'Gagal memuat metrik');
     }

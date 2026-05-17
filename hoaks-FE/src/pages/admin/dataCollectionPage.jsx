@@ -176,6 +176,60 @@ export default function DataCollectionPage() {
                 </div>
               </div>
             )}
+
+            {/* Analisis Kata per Kategori (4 kolom) */}
+            {statsData.word_categories && (
+              <div>
+                <p className="label" style={{ marginBottom: 8 }}>Analisis Kata per Kategori</p>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                    <thead>
+                      <tr>
+                        {[
+                          { label: 'Kata Sifat', color: 'var(--warning)' },
+                          { label: 'Kata Benda', color: 'var(--primary)' },
+                          { label: 'Kata Keterangan', color: 'var(--info)' },
+                          { label: 'Kata Kerja', color: 'var(--success)' },
+                        ].map(h => (
+                          <th key={h.label} style={{
+                            padding: '8px 10px', borderBottom: '2px solid var(--border)',
+                            fontWeight: 700, color: h.color, textAlign: 'left', fontSize: '0.75rem',
+                          }}>{h.label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: Math.max(
+                        statsData.word_categories.kata_sifat?.length || 0,
+                        statsData.word_categories.kata_benda?.length || 0,
+                        statsData.word_categories.kata_keterangan?.length || 0,
+                        statsData.word_categories.kata_kerja?.length || 0,
+                        1
+                      ) }, (_, i) => (
+                        <tr key={i}>
+                          {['kata_sifat', 'kata_benda', 'kata_keterangan', 'kata_kerja'].map(cat => {
+                            const item = statsData.word_categories[cat]?.[i];
+                            return (
+                              <td key={cat} style={{
+                                padding: '6px 10px', borderBottom: '1px solid var(--border)',
+                                color: item ? 'var(--text-secondary)' : 'var(--text-muted)',
+                              }}>
+                                {item ? (
+                                  <>{item.word} <span style={{ opacity: 0.5 }}>({item.count})</span></>
+                                ) : '-'}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      )).slice(0, 15)}
+                    </tbody>
+                  </table>
+                </div>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>
+                  * Klasifikasi berdasarkan heuristik imbuhan bahasa Indonesia (awalan me-/ber-/di- untuk kata kerja, dll.)
+                </p>
+              </div>
+            )}
           </div>
         )}
       </Modal>

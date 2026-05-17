@@ -183,6 +183,75 @@ def dataset_stats(dataset_id):
             "max": int(char_lengths.max()),
         }
 
+        # ===== Analisis Kata per Kategori (heuristik) =====
+        import re
+        all_words_list = all_words  # sudah lowercase dari atas
+
+        # Daftar stopword sederhana untuk exclude
+        stopwords = {
+            "yang", "dan", "di", "ke", "dari", "ini", "itu",
+            "dengan", "untuk", "pada", "adalah", "dalam", "oleh",
+            "juga", "atau", "akan", "ada", "bisa", "saya", "kita",
+            "mereka", "dia", "ia", "se", "nya", "lah",
+        }
+        filtered = [w for w in all_words_list if w not in stopwords and len(w) > 2]
+        word_freq = Counter(filtered)
+
+        # Kata keterangan (adverbia) — daftar tetap
+        adverbia_list = {
+            "tidak", "sangat", "sudah", "belum", "masih", "akan",
+            "pernah", "selalu", "sering", "jarang", "segera", "hampir",
+            "justru", "bahkan", "hanya", "semakin", "terlalu", "cukup",
+            "memang", "mungkin", "tentu", "pasti", "agak", "lagi",
+        }
+
+        # Klasifikasi heuristik
+        kata_kerja = []
+        kata_benda = []
+        kata_sifat = []
+        kata_keterangan = []
+
+        for word, count in word_freq.most_common(200):
+            if word in adverbia_list:
+                kata_keterangan.append({"word": word, "count": count})
+            elif re.match(r"^(me|mem|men|meny|meng|ber|di|ter|per)", word) and len(word) > 4:
+                kata_kerja.append({"word": word, "count": count})
+            elif re.match(r"^(pe|pen|pem|peng|peny|per|ke)", word) and (
+                word.endswith("an") or word.endswith("nya")
+            ):
+                kata_benda.append({"word": word, "count": count})
+            elif (word.endswith("nya") or word.endswith("is") or
+                  word.endswith("al") or word.endswith("if")):
+                kata_sifat.append({"word": word, "count": count})
+
+        # Kata benda tambahan: kata tanpa prefix yang umum sebagai nomina
+        nomina_common = {
+            "presiden", "menteri", "pemerintah", "rakyat", "negara",
+            "partai", "polisi", "uang", "dana", "hukum", "anggota",
+            "pasal", "wakil", "ketua", "jenderal", "gubernur",
+            "bupati", "walikota", "calon", "pemilu", "pilkada",
+        }
+        for word in nomina_common:
+            if word in word_freq and not any(
+                w["word"] == word for w in kata_benda
+            ):
+                kata_benda.append({
+                    "word": word, "count": word_freq[word]
+                })
+
+        # Sort tiap kategori by count, limit 20
+        kata_kerja.sort(key=lambda x: x["count"], reverse=True)
+        kata_benda.sort(key=lambda x: x["count"], reverse=True)
+        kata_sifat.sort(key=lambda x: x["count"], reverse=True)
+        kata_keterangan.sort(key=lambda x: x["count"], reverse=True)
+
+        stats["word_categories"] = {
+            "kata_kerja": kata_kerja[:20],
+            "kata_benda": kata_benda[:20],
+            "kata_sifat": kata_sifat[:20],
+            "kata_keterangan": kata_keterangan[:20],
+        }
+
     return jsonify(stats), 200
 
 

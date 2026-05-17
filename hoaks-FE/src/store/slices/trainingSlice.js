@@ -5,6 +5,45 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../../services/api';
 
+// IndoBERT Fine-tuning
+export const startIndoBERTFinetune = createAsyncThunk(
+  'training/indoBERT',
+  async (config, { rejectWithValue }) => {
+    try {
+      const res = await api.post('/training/indobert', config);
+      return res.data;
+    } catch (err) {
+      return rejectWithValue(err.response?.data?.error || 'Fine-tuning gagal');
+    }
+  }
+);
+
+export const fetchIndoBERTStatus = createAsyncThunk(
+  'training/indoBERTStatus',
+  async (sessionId, { rejectWithValue }) => {
+    try {
+      const res = await api.get(`/training/indobert/status/${sessionId}`);
+      return res.data;
+    } catch (err) {
+      return rejectWithValue(err.response?.data?.error || 'Gagal memuat status');
+    }
+  }
+);
+
+// TAHAP A: Eksperimen rasio
+export const experimentRatios = createAsyncThunk(
+  'training/experiment',
+  async ({ dataset_id, ratios, gat_params }, { rejectWithValue }) => {
+    try {
+      const res = await api.post('/training/experiment', { dataset_id, ratios, gat_params });
+      return res.data;
+    } catch (err) {
+      return rejectWithValue(err.response?.data?.error || 'Eksperimen gagal');
+    }
+  }
+);
+
+// TAHAP B: Training final
 export const startTraining = createAsyncThunk(
   'training/start',
   async (config, { rejectWithValue }) => {
@@ -80,9 +119,18 @@ export const activateModel = createAsyncThunk(
 const trainingSlice = createSlice({
   name: 'training',
   initialState: {
+    // IndoBERT
+    indoBERTStatus: null,
+    indoBERTLoading: false,
+    // Tahap A: Eksperimen rasio
+    experimentResults: null,
+    experimentLoading: false,
+    selectedRatio: null,
+    // Tahap B: Training final
     activeSessionId: null,
     status: null,
     results: null,
+    // Riwayat & model
     sessions: [],
     models: [],
     loading: false,
@@ -92,14 +140,46 @@ const trainingSlice = createSlice({
     setActiveSession(state, action) {
       state.activeSessionId = action.payload;
     },
+    setSelectedRatio(state, action) {
+      state.selectedRatio = action.payload;
+    },
+    clearExperiment(state) {
+      state.experimentResults = null;
+      state.selectedRatio = null;
+    },
     clearTrainingState(state) {
       state.status = null;
       state.results = null;
       state.activeSessionId = null;
     },
+    clearIndoBERTState(state) {
+      state.indoBERTStatus = null;
+    },
+    clearError(state) {
+      state.error = null;
+    },
   },
   extraReducers: (builder) => {
     builder
+      // Eksperimen rasio
+      .addCase(experimentRatios.pending, (state) => {
+        state.experimentLoading = true;
+        state.error = null;
+        state.experimentResults = null;
+      })
+      .addCase(experimentRatios.fulfilled, (state, action) => {
+        state.experimentLoading = false;
+        state.experimentResults = action.payload;
+        // Auto-select rasio terbaik
+        if (action.payload.ranking?.length > 0) {
+          state.selectedRatio = action.payload.ranking[0].ratio;
+        }
+      })
+      .addCase(experimentRatios.rejected, (state, action) => {
+        state.experimentLoading = false;
+        state.error = action.payload;
+      })
+      // Training
       .addCase(startTraining.pending, (state) => { state.loading = true; state.error = null; })
       .addCase(startTraining.fulfilled, (state, action) => {
         state.loading = false;
@@ -126,9 +206,25 @@ const trainingSlice = createSlice({
           ...m,
           is_active: m.id === action.payload.modelId,
         }));
+      })
+      // IndoBERT
+      .addCase(startIndoBERTFinetune.pending, (state) => { state.indoBERTLoading = true; state.error = null; })
+      .addCase(startIndoBERTFinetune.fulfilled, (state, action) => {
+        state.indoBERTLoading = false;
+        state.indoBERTStatus = action.payload;
+      })
+      .addCase(startIndoBERTFinetune.rejected, (state, action) => {
+        state.indoBERTLoading = false;
+        state.error = action.payload;
+      })
+      .addCase(fetchIndoBERTStatus.fulfilled, (state, action) => {
+        state.indoBERTStatus = action.payload;
       });
   },
 });
 
-export const { setActiveSession, clearTrainingState } = trainingSlice.actions;
+export const {
+  setActiveSession, setSelectedRatio, clearExperiment,
+  clearTrainingState, clearIndoBERTState, clearError,
+} = trainingSlice.actions;
 export default trainingSlice.reducer;

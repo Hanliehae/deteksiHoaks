@@ -11,6 +11,53 @@ from sqlalchemy import desc
 from datetime import datetime, timezone
 
 
+# =============================================================
+# TAHAP A: EKSPERIMEN RASIO (test cepat semua rasio)
+# =============================================================
+
+@training_bp.route("/experiment", methods=["POST"])
+@admin_required
+def experiment_ratios():
+    """
+    POST /api/training/experiment
+    Body: {
+        "dataset_id": 1,
+        "ratios": [0.5, 0.6, 0.7]
+    }
+    Response: ranking rasio berdasarkan F1-score
+    """
+    data = request.get_json()
+
+    if not data or not data.get("dataset_id") or not data.get("ratios"):
+        return jsonify({"error": "dataset_id dan ratios wajib diisi"}), 400
+
+    ratios = data["ratios"]
+    # Validasi rasio
+    for r in ratios:
+        if not (0.1 <= r <= 0.95):
+            return jsonify({
+                "error": f"Rasio {r} tidak valid. Harus antara 0.1 dan 0.95"
+            }), 400
+
+    gat_params = data.get("gat_params", {})
+
+    from services.training import run_ratio_experiment
+    result = run_ratio_experiment(
+        dataset_id=data["dataset_id"],
+        ratios=ratios,
+        gat_params=gat_params,
+    )
+
+    if not result["success"]:
+        return jsonify({"error": result.get("error", "Eksperimen gagal")}), 400
+
+    return jsonify(result), 200
+
+
+# =============================================================
+# TAHAP B: TRAINING FINAL (1 rasio + epoch/LR custom)
+# =============================================================
+
 @training_bp.route("/start", methods=["POST"])
 @admin_required
 def start_training():
@@ -18,9 +65,11 @@ def start_training():
     POST /api/training/start
     Body: {
         "dataset_id": 1,
-        "split_ratios": [0.7, 0.8, 0.9],
-        "epochs": [10, 20, 30],
+        "split_ratio": 0.7,          (single ratio — baru)
+        "split_ratios": [0.7],       (legacy — tetap support)
+        "epochs": 30,                (single epoch — baru)
         "learning_rate": 0.001,
+        "model_name": "GAT_v1",
         "gat_params": {"heads": 4, "hidden_dim": 128, "dropout": 0.3}
     }
     """
@@ -52,14 +101,32 @@ def start_training():
                 "session_id": running.id,
             }), 409
 
+        # Parse split_ratio (support single dan array)
+        split_ratio = data.get("split_ratio")
+        split_ratios = data.get("split_ratios")
+        if split_ratio:
+            split_ratios = [float(split_ratio)]
+        elif split_ratios:
+            if isinstance(split_ratios, (int, float)):
+                split_ratios = [float(split_ratios)]
+        else:
+            split_ratios = [0.7]
+
+        # Parse epochs (support single dan array)
+        epochs_input = data.get("epochs", 30)
+        if isinstance(epochs_input, list):
+            epochs_list = [int(e) for e in epochs_input]
+        else:
+            epochs_list = [int(epochs_input)]
+
         # Buat training session
         session = TrainingSession(
             dataset_id=data["dataset_id"],
             status="pending",
             progress=0,
             current_step="Menunggu dimulai...",
-            split_ratios=data.get("split_ratios", [0.7, 0.8, 0.9]),
-            epochs=data.get("epochs", [10, 20, 30]),
+            split_ratios=split_ratios,
+            epochs=epochs_list,
             learning_rate=data.get("learning_rate", 0.001),
             gat_params=data.get("gat_params", {}),
             model_name=data.get("model_name", ""),
@@ -122,7 +189,7 @@ def get_training_status(session_id):
 @training_bp.route("/results/<int:session_id>", methods=["GET"])
 @admin_required
 def get_training_results(session_id):
-    """GET /api/training/results/<id> — tabel metrik per rasio per epoch"""
+    """GET /api/training/results/<id> — metrik per rasio per epoch (train + test)"""
     db = SessionLocal()
     try:
         session = db.query(TrainingSession).filter(
@@ -156,10 +223,16 @@ def get_training_results(session_id):
                     "train_count": r.train_count,
                     "test_count": r.test_count,
                     "epoch": r.epoch,
+                    # Test metrics
                     "accuracy": r.accuracy,
                     "precision": r.precision_score,
                     "recall": r.recall,
                     "f1_score": r.f1_score,
+                    # Train metrics (baru)
+                    "train_accuracy": r.train_accuracy,
+                    "train_precision": r.train_precision,
+                    "train_recall": r.train_recall,
+                    "train_f1": r.train_f1,
                     "is_best": r.is_best,
                     "confusion_matrix": r.confusion_matrix,
                 }
@@ -173,32 +246,42 @@ def get_training_results(session_id):
 @training_bp.route("/history", methods=["GET"])
 @admin_required
 def get_training_history():
-    """GET /api/training/history"""
+    """GET /api/training/history — riwayat training dengan metrik lengkap"""
     db = SessionLocal()
     try:
         sessions = db.query(TrainingSession).order_by(
             desc(TrainingSession.started_at)
         ).all()
 
-        return jsonify({
-            "sessions": [
-                {
-                    "id": s.id,
-                    "status": s.status,
-                    "dataset_id": s.dataset_id,
-                    "model_name": getattr(s, "model_name", ""),
-                    "best_f1": s.best_f1,
-                    "best_ratio": s.best_ratio,
-                    "best_epoch": s.best_epoch,
-                    "split_ratios": s.split_ratios,
-                    "epochs": s.epochs,
-                    "learning_rate": s.learning_rate,
-                    "started_at": s.started_at.isoformat() if s.started_at else None,
-                    "completed_at": s.completed_at.isoformat() if s.completed_at else None,
-                }
-                for s in sessions
-            ]
-        }), 200
+        history = []
+        for s in sessions:
+            # Cari best result untuk metrik lengkap
+            best_result = db.query(TrainingResult).filter(
+                TrainingResult.session_id == s.id,
+                TrainingResult.is_best == True,  # noqa: E712
+            ).first()
+
+            history.append({
+                "id": s.id,
+                "status": s.status,
+                "dataset_id": s.dataset_id,
+                "model_name": getattr(s, "model_name", ""),
+                "best_f1": s.best_f1,
+                "best_ratio": s.best_ratio,
+                "best_epoch": s.best_epoch,
+                "split_ratios": s.split_ratios,
+                "epochs": s.epochs,
+                "learning_rate": s.learning_rate,
+                # Metrik lengkap dari best result (baru)
+                "accuracy": best_result.accuracy if best_result else None,
+                "precision": best_result.precision_score if best_result else None,
+                "recall": best_result.recall if best_result else None,
+                "f1_score": best_result.f1_score if best_result else None,
+                "started_at": s.started_at.isoformat() if s.started_at else None,
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+            })
+
+        return jsonify({"sessions": history}), 200
     finally:
         db.close()
 
@@ -270,3 +353,77 @@ def activate_model(model_id):
         return jsonify({"error": str(e)}), 500
     finally:
         db.close()
+
+
+# =============================================================
+# INDOBERT FINE-TUNING
+# =============================================================
+
+# In-memory status store untuk IndoBERT fine-tuning
+_indobert_sessions = {}
+
+
+@training_bp.route("/indobert", methods=["POST"])
+@admin_required
+def start_indobert_finetune():
+    """
+    POST /api/training/indobert
+    Body: {
+        "dataset_id": 1,
+        "unfreeze_layers": [8, 9, 10, 11],
+        "max_length": 256,
+        "batch_size": 16,
+        "learning_rate": 2e-5,
+        "epochs": 3
+    }
+    """
+    data = request.get_json()
+
+    if not data or not data.get("dataset_id"):
+        return jsonify({"error": "dataset_id wajib diisi"}), 400
+
+    import threading
+    session_id = f"indobert_{int(datetime.now(timezone.utc).timestamp())}"
+
+    _indobert_sessions[session_id] = {
+        "session_id": session_id,
+        "status": "running",
+        "progress": 0,
+        "current_step": "Memulai fine-tuning IndoBERT...",
+        "epoch_results": [],
+        "best_val_accuracy": None,
+        "error": None,
+    }
+
+    def run_finetune():
+        from services.indobert_training import run_indobert_finetuning
+        try:
+            run_indobert_finetuning(
+                session_id=session_id,
+                dataset_id=data["dataset_id"],
+                unfreeze_layers=data.get("unfreeze_layers", [8, 9, 10, 11]),
+                max_length=data.get("max_length", 256),
+                batch_size=data.get("batch_size", 16),
+                learning_rate=data.get("learning_rate", 2e-5),
+                epochs=data.get("epochs", 3),
+                status_store=_indobert_sessions,
+            )
+        except Exception as e:
+            _indobert_sessions[session_id]["status"] = "failed"
+            _indobert_sessions[session_id]["error"] = str(e)
+            _indobert_sessions[session_id]["current_step"] = f"Error: {str(e)}"
+
+    thread = threading.Thread(target=run_finetune, daemon=True)
+    thread.start()
+
+    return jsonify(_indobert_sessions[session_id]), 202
+
+
+@training_bp.route("/indobert/status/<session_id>", methods=["GET"])
+@admin_required
+def get_indobert_status(session_id):
+    """GET /api/training/indobert/status/<id>"""
+    if session_id not in _indobert_sessions:
+        return jsonify({"error": "Session tidak ditemukan"}), 404
+    return jsonify(_indobert_sessions[session_id]), 200
+

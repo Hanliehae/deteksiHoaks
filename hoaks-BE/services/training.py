@@ -142,6 +142,36 @@ def train_gat_model(train_emb, train_labels, edge_index,
     return model, losses, accuracies
 
 
+def evaluate_on_train(model, train_emb, train_labels, edge_index):
+    """
+    Evaluasi model GAT di TRAIN set (untuk deteksi overfitting).
+    Returns: dict dengan accuracy, precision, recall, f1
+    """
+    device = torch.device("cpu")
+    x = torch.tensor(train_emb, dtype=torch.float).to(device)
+
+    num_nodes = x.size(0)
+    mask = (edge_index[0] < num_nodes) & (edge_index[1] < num_nodes)
+    edge = edge_index[:, mask].to(device)
+
+    model.eval()
+    with torch.no_grad():
+        logits = model(x, edge)
+        preds = logits.argmax(dim=1).cpu().numpy()
+
+    acc = accuracy_score(train_labels, preds)
+    prec = precision_score(train_labels, preds, average="macro", zero_division=0)
+    rec = recall_score(train_labels, preds, average="macro", zero_division=0)
+    f1 = f1_score(train_labels, preds, average="macro", zero_division=0)
+
+    return {
+        "accuracy": round(acc, 4),
+        "precision": round(prec, 4),
+        "recall": round(rec, 4),
+        "f1_score": round(f1, 4),
+    }
+
+
 def evaluate_model(model, train_emb, test_emb, train_labels, test_labels,
                     train_edge_index):
     """
@@ -201,10 +231,124 @@ def _update_session(session_id, **kwargs):
         db.close()
 
 
+# =============================================================
+# TAHAP A: EKSPERIMEN RASIO (Quick test semua rasio)
+# =============================================================
+
+def run_ratio_experiment(dataset_id, ratios, gat_params=None):
+    """
+    Eksperimen cepat: test semua rasio dengan epoch kecil (10).
+    Ini tahap pertama yang dospem minta — admin melihat rasio mana terbaik.
+
+    Args:
+        dataset_id: ID dataset
+        ratios: list of float, e.g. [0.5, 0.6, 0.7]
+        gat_params: parameter GAT (opsional)
+
+    Returns:
+        {
+            "success": True,
+            "results": [
+                {"ratio": 0.7, "train_pct": 70, "test_pct": 30,
+                 "f1": 0.95, "accuracy": 0.94, "precision": 0.93, "recall": 0.96,
+                 "train_count": 700, "test_count": 300},
+                ...
+            ],
+            "ranking": [...] (urut dari F1 terbaik)
+        }
+    """
+    from services.dataset import load_dataset_dataframe
+
+    # Load dataset
+    df = load_dataset_dataframe(dataset_id)
+    if df is None:
+        return {"success": False, "error": "Dataset tidak ditemukan"}
+
+    # Preprocessing
+    texts = df["teks"].tolist()
+    labels = df["label"].values
+    processed_texts = [preprocess_text(str(t)) for t in texts]
+
+    # Extract embeddings
+    from services.inference import extract_embedding
+    embeddings = []
+    for text in processed_texts:
+        emb = extract_embedding(text)
+        if emb is not None:
+            embeddings.append(emb)
+        else:
+            embeddings.append(np.zeros(768))
+
+    all_embeddings = np.array(embeddings)
+
+    # Test setiap rasio dengan epoch kecil (10)
+    experiment_epoch = 10
+    results = []
+
+    for ratio in ratios:
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(
+                all_embeddings, labels,
+                train_size=ratio,
+                stratify=labels,
+                random_state=42,
+            )
+
+            edge_index = build_knn_graph(
+                X_train,
+                k=Config.GRAPH_K,
+                threshold=Config.GRAPH_THRESHOLD,
+            )
+
+            model, losses, accs = train_gat_model(
+                X_train, y_train, edge_index,
+                epochs=experiment_epoch, lr=0.001, gat_params=gat_params,
+            )
+
+            test_metrics = evaluate_model(
+                model, X_train, X_test, y_train, y_test, edge_index
+            )
+
+            results.append({
+                "ratio": ratio,
+                "train_pct": int(ratio * 100),
+                "test_pct": int((1 - ratio) * 100),
+                "f1": test_metrics["f1_score"],
+                "accuracy": test_metrics["accuracy"],
+                "precision": test_metrics["precision"],
+                "recall": test_metrics["recall"],
+                "train_count": len(X_train),
+                "test_count": len(X_test),
+            })
+        except Exception as e:
+            results.append({
+                "ratio": ratio,
+                "train_pct": int(ratio * 100),
+                "test_pct": int((1 - ratio) * 100),
+                "error": str(e),
+                "f1": 0,
+            })
+
+    # Ranking: urut dari F1 terbaik
+    ranking = sorted(results, key=lambda x: x.get("f1", 0), reverse=True)
+
+    return {
+        "success": True,
+        "results": results,
+        "ranking": ranking,
+        "dataset_size": len(all_embeddings),
+    }
+
+
+# =============================================================
+# TAHAP B: TRAINING FINAL (dengan 1 rasio + epoch/LR custom)
+# =============================================================
+
 def run_training_pipeline(session_id: int):
     """
     Jalankan training pipeline di background thread.
-    Ini adalah fungsi utama yang dipanggil saat admin klik "Mulai Training".
+    Sekarang menerima 1 rasio saja (bukan array), sesuai alur 2-tahap dospem.
+    Menyimpan metrik training DAN testing per epoch untuk tabel perbandingan.
     """
     db = SessionLocal()
     try:
@@ -265,8 +409,15 @@ def run_training_pipeline(session_id: int):
         all_embeddings = np.array(embeddings)
 
         # Parse parameters
-        split_ratios = session.split_ratios or [0.7, 0.8, 0.9]
-        epoch_list = session.epochs or [10, 20, 30]
+        # Support baik array (legacy) maupun single ratio (baru)
+        split_ratios = session.split_ratios or [0.7]
+        if isinstance(split_ratios, (int, float)):
+            split_ratios = [split_ratios]
+
+        epoch_list = session.epochs or [30]
+        if isinstance(epoch_list, (int, float)):
+            epoch_list = [int(epoch_list)]
+
         lr = session.learning_rate or 0.001
         gat_params = session.gat_params or {}
 
@@ -276,6 +427,7 @@ def run_training_pipeline(session_id: int):
         best_ratio = None
         best_epoch = None
         best_model_state = None
+        best_gat_params = None
 
         # Per rasio split
         for ratio in split_ratios:
@@ -316,19 +468,25 @@ def run_training_pipeline(session_id: int):
                     epochs=epochs, lr=lr, gat_params=gat_params,
                 )
 
-                # Evaluate
-                metrics = evaluate_model(
+                # Evaluate di test set
+                test_metrics = evaluate_model(
                     model, X_train, X_test, y_train, y_test, edge_index
                 )
 
-                is_best = metrics["f1_score"] > best_f1
+                # Evaluate di train set (untuk deteksi overfitting)
+                train_metrics = evaluate_on_train(
+                    model, X_train, y_train, edge_index
+                )
+
+                is_best = test_metrics["f1_score"] > best_f1
                 if is_best:
-                    best_f1 = metrics["f1_score"]
+                    best_f1 = test_metrics["f1_score"]
                     best_ratio = ratio
                     best_epoch = epochs
                     best_model_state = model.state_dict()
+                    best_gat_params = gat_params.copy()
 
-                # Simpan hasil ke DB
+                # Simpan hasil ke DB (termasuk train metrics)
                 db2 = SessionLocal()
                 try:
                     result = TrainingResult(
@@ -337,12 +495,18 @@ def run_training_pipeline(session_id: int):
                         train_count=len(X_train),
                         test_count=len(X_test),
                         epoch=epochs,
-                        accuracy=metrics["accuracy"],
-                        precision_score=metrics["precision"],
-                        recall=metrics["recall"],
-                        f1_score=metrics["f1_score"],
+                        # Test metrics
+                        accuracy=test_metrics["accuracy"],
+                        precision_score=test_metrics["precision"],
+                        recall=test_metrics["recall"],
+                        f1_score=test_metrics["f1_score"],
+                        # Train metrics (baru — untuk tabel overfitting)
+                        train_accuracy=train_metrics["accuracy"],
+                        train_precision=train_metrics["precision"],
+                        train_recall=train_metrics["recall"],
+                        train_f1=train_metrics["f1_score"],
                         is_best=is_best,
-                        confusion_matrix=metrics["confusion_matrix"],
+                        confusion_matrix=test_metrics["confusion_matrix"],
                     )
                     db2.add(result)
                     db2.commit()
@@ -354,7 +518,7 @@ def run_training_pipeline(session_id: int):
         # Simpan model terbaik ke file
         if best_model_state is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            model_name = f"gat_{timestamp}_r{int(best_ratio*100)}_e{best_epoch}"
+            model_name = session.model_name or f"gat_{timestamp}_r{int(best_ratio*100)}_e{best_epoch}"
             model_dir = os.path.join(Config.TRAINED_MODELS_DIR, model_name)
             os.makedirs(model_dir, exist_ok=True)
 
@@ -396,7 +560,7 @@ def run_training_pipeline(session_id: int):
                     result_id=best_result.id if best_result else None,
                     model_name=model_name,
                     model_path=model_path,
-                    accuracy=metrics["accuracy"] if best_result else None,
+                    accuracy=best_result.accuracy if best_result else None,
                     f1_score=best_f1,
                 )
                 db3.add(trained_model)

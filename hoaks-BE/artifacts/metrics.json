@@ -16,13 +16,19 @@
     "precision": 0.975,
     "recall": 0.989,
     "f1_score": 0.982,
-    "mcc": 0.964
+    "macro_avg": 0.982,
+    "weighted_avg": 0.982,
+    "mcc": 0.964,
+    "roc_auc": 0.999
   },
   "test_metrics": {
     "accuracy": 0.945,
     "precision": 0.932,
     "recall": 0.958,
     "f1_score": 0.945,
-    "mcc": 0.891
+    "macro_avg": 0.945,
+    "weighted_avg": 0.945,
+    "mcc": 0.891,
+    "roc_auc": 0.982
   }
 }

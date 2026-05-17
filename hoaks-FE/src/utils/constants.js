@@ -43,7 +43,18 @@ export const NAV_ADMIN = [
   { path: '/admin', label: 'Beranda', icon: 'dashboard' },
   { path: '/admin/datasets', label: 'Data Collection', icon: 'data' },
   { path: '/admin/preprocessing', label: 'Pre-Processing', icon: 'preprocessing' },
-  { path: '/admin/processing', label: 'Processing', icon: 'training' },
+  { path: '/admin/indobert', label: 'IndoBERT', icon: 'indobert' },
+  { path: '/admin/gat', label: 'GAT', icon: 'gat' },
   { path: '/admin/testing', label: 'Testing', icon: 'testing' },
   { path: '/admin/evaluation', label: 'Evaluasi', icon: 'evaluation' },
 ];
+
+export const DEFAULT_INDOBERT_PARAMS = {
+  unfreeze_layers: [8, 9, 10, 11],
+  max_length: 256,
+  batch_size: 16,
+  learning_rate: 2e-5,
+  epochs: 3,
+  weight_decay: 0.01,
+  warmup_ratio: 0.1,
+};

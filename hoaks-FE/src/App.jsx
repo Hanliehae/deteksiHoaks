@@ -11,7 +11,8 @@ import LoginPage from './pages/admin/LoginPage';
 import DashboardPage from './pages/admin/DashboardPage';
 import DataCollectionPage from './pages/admin/DataCollectionPage';
 import PreProcessingPage from './pages/admin/PreProcessingPage';
-import ProcessingPage from './pages/admin/ProcessingPage';
+import IndoBERTPage from './pages/admin/IndoBERTPage';
+import GATPage from './pages/admin/ProcessingPage';
 import TestingPage from './pages/admin/TestingPage';
 import EvaluationPage from './pages/admin/EvaluationPage';
 
@@ -42,7 +43,8 @@ function App() {
         <Route path="/admin" element={<DashboardPage />} />
         <Route path="/admin/datasets" element={<DataCollectionPage />} />
         <Route path="/admin/preprocessing" element={<PreProcessingPage />} />
-        <Route path="/admin/processing" element={<ProcessingPage />} />
+        <Route path="/admin/indobert" element={<IndoBERTPage />} />
+        <Route path="/admin/gat" element={<GATPage />} />
         <Route path="/admin/testing" element={<TestingPage />} />
         <Route path="/admin/evaluation" element={<EvaluationPage />} />
       </Route>

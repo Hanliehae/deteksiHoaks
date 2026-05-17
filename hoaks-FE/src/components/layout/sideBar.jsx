@@ -6,7 +6,7 @@ import { NavLink } from 'react-router-dom';
 import { NAV_USER, NAV_ADMIN } from '../../utils/constants';
 import {
   FiSearch, FiClock, FiGrid, FiDatabase,
-  FiFilter, FiCpu, FiBarChart2, FiPlay
+  FiFilter, FiCpu, FiBarChart2, FiPlay, FiType, FiShare2
 } from 'react-icons/fi';
 import './Layout.css';
 
@@ -16,6 +16,8 @@ const iconMap = {
   dashboard: FiGrid,
   data: FiDatabase,
   preprocessing: FiFilter,
+  indobert: FiType,
+  gat: FiShare2,
   training: FiCpu,
   testing: FiPlay,
   evaluation: FiBarChart2,
